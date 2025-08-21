@@ -188,6 +188,7 @@ function Get-YkInfo
 	return $Result
 }
 
+
 function Wait-YkInsert
 {
     [CmdletBinding()]
@@ -273,6 +274,7 @@ function Get-RandomHexNumber # Get-RandomHexNumber -Length 64
 	$Result
 }
 
+
 function Invoke-YubiEnrollCommand
 {
     [CmdletBinding()]
@@ -326,7 +328,6 @@ function Check-YubiEnrollAuth
 }
 
 
-
 function Add-YkIdentity
 {
     [CmdletBinding()]
@@ -370,6 +371,7 @@ function Set-YkFidoPin
 	Invoke-YubiKeyManager -Command "fido access change-pin --pin $OldPin --new-pin $NewPin"
 }
 
+
 function Show-Profiles 
 {
 	[CmdletBinding()]
@@ -380,3 +382,195 @@ function Show-Profiles
 }
 
 
+function Show-Credentials
+{
+	[CmdletBinding()]
+	param()
+
+	$UserID = Read-Host 'UserID '
+	$YubiEnrollPath = Invoke-YubiEnrollCommand -OnlyReturnYubiEnrollPath
+	& $YubiEnrollPath credentials list "$UserID"
+}
+
+
+function Add-Profile
+{
+	[CmdletBinding()]
+	param()
+
+	Write-Host
+	$ProfileName = Read-Host 'Name the profile to create '
+	$YubiEnrollPath = Invoke-YubiEnrollCommand -OnlyReturnYubiEnrollPath
+	& $YubiEnrollPath profiles add $ProfileName
+}
+
+
+function Remove-Profile
+{
+	[CmdletBinding()]
+	param()
+
+	Write-Host
+	Show-Profiles
+	$ProfileName = Read-Host 'Name the profile to delete '
+	$Command = 'delete'
+	try {
+		$YubiEnrollPath = Invoke-YubiEnrollCommand -OnlyReturnYubiEnrollPath 
+		& $YubiEnrollPath profiles $Command $ProfileName
+	}
+	catch {
+		
+		Write-Host "`nThis profile do not exist."
+	}
+}
+
+
+function Invoke-YubiKeyManager 
+{
+	[CmdletBinding()]
+    param (
+        [string]$Command
+    )
+    try {
+        $fullCommand = "ykman $Command"
+        Write-Host "Executing: $fullCommand"
+        Invoke-Expression $fullCommand
+    } catch {
+        Write-Host "`nFailed to execute YubiKey Manager command: $($_.Exception.Message)"
+    }
+}
+
+
+function Reset-YkFidoCredentials
+{
+	[CmdletBinding()]
+	param()
+
+	Write-Host
+	Invoke-YubiKeyManager -Command 'fido reset --force'
+}
+
+
+function Add-LockCode {
+    [CmdletBinding()]
+    param ()
+
+    $Stop = $false
+    while (!$Stop) {
+        $Key = ykman list --serials
+        Write-Host "Waiting for 1 key..."
+        Start-Sleep 3
+        if ($Key) {
+            $Stop = $true
+        }
+    }
+
+    $Key = ykman list --serials
+    $LockCode = Get-RandomHexNumber
+    Write-Warning "Generated LockCode: $LockCode DO NOT LOOSE IT !
+	"
+
+    Invoke-YubiKeyManager -Command "--device $Key config set-lock-code --new-lock-code $LockCode"
+
+    $LockRecord = [PSCustomObject]@{
+        SerialNumber = $Key
+        LockCode     = $LockCode
+    }
+
+    $CsvPath = "{ LockCodes.csv FULL PATH HERE }"
+
+    $LockRecord | Export-Csv -Path $CsvPath -Append -NoTypeInformation
+}
+
+
+function Clear-LockCode {
+	[CmdletBinding()]
+	param ()
+	
+	$SerialsList = ykman list --serials
+	$Key = ykman list --serials
+	$LockCode = Get-RandomHexNumber
+	Write-Host $LockCode
+
+	Invoke-YubiKeyManager -Command "--device $Key config set-lock-code -c"
+}
+
+
+function Add-ProfileConfiguration
+{
+	[CmdletBinding()]
+	param()
+
+	$TenantName = Read-Host "`nEnter Tenant Name "
+	$ClientID = Read-Host "`nEnter AppID "
+	$DirectoryID = Read-Host 'Enter Directory (tenant) ID '
+
+	# 3 default profiles here : 
+	$Profiles = @"	
+[profiles."Reinitialize/ForcePinChange"]
+min_pin_length = 6
+require_always_uv = false
+require_ea = false
+reset = true
+force_pin_change = true
+random_pin = true
+random_pin_length = 6
+ 
+[profiles."Reinitialize/NoForcedPinChange"]
+min_pin_length = 6
+require_always_uv = false
+require_ea = false
+reset = true
+force_pin_change = false
+random_pin = true
+random_pin_length = 6
+ 
+[profiles."AddIdentity"]
+min_pin_length = 6
+require_always_uv = false
+require_ea = false
+reset = false
+force_pin_change = false
+random_pin = false
+random_pin_length = 6
+"@
+
+	$fileContent = @"
+active_provider = "$TenantName"
+
+[providers.$TenantName]
+provider = "ENTRA"
+client_id = "$ClientID"
+redirect_uri = "http://localhost/yubienroll-redirect"
+tenant_id = "$DirectoryID"
+entra_base_url = "https://login.microsoftonline.com"
+graph_base_url = "https://graph.microsoft.com"
+
+$Profiles
+"@
+	$ExistingConfig = gc "$($env:APPDATA)\Yubico\yubienroll\yubienroll.toml" -ErrorAction SilentlyContinue
+	if ($ExistingConfig)
+	{
+			Write-Host "`nConfiguration already present."
+	}
+	else
+	{
+		Set-Content -Path "$($env:APPDATA)\Yubico\yubienroll\yubienroll.toml" -Value $fileContent
+		Write-Host "`nConfiguration is loaded."
+	}
+}
+
+
+function Login 
+{
+	[CmdletBinding()]
+	param()
+	try {
+		$YubiEnrollPath = Invoke-YubiEnrollCommand -OnlyReturnYubiEnrollPath
+		& $YubiEnrollPath login
+	}
+	catch {
+
+		Write-Error "`n$_"
+	}
+}
