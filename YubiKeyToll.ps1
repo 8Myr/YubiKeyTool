@@ -574,3 +574,102 @@ function Login
 		Write-Error "`n$_"
 	}
 }
+
+
+function Invoke-YkAutoManage
+{
+    [CmdletBinding()]
+	param
+	(
+		[int] $TimeoutSeconds = 0
+		,
+		[switch] $MassManagement
+	)
+
+	if (!$MassManagement) 
+	{	
+    	$YubiKey = Wait-YKInsert -TimeoutSeconds $TimeoutSeconds
+	}
+	else 
+	{
+		[array]$UserID = gc "{ UserIDs.txt FULL PATH HERE }"
+		Show-Profiles
+		$Profile = Read-Host "`nSelect profile "
+		
+		$Count = 0
+
+		while($Count -ne $UserID.Count)
+		{
+			[Array] $Global:YubiKeyList = Get-YkInfo
+			cls
+			Write-Host "Please disconnect all keys then connect  | $($YubiKeyList.Count) YubiKey(s) found"
+			$YubiKey = Wait-YkInsert			
+			$logPath = New-Item -Path $([System.IO.Path]::GetTempPath()) -Name "transcript-yubienroll_$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+    		Start-Transcript -Path $logPath -Append
+    		Add-YkIdentity -UserID $UserID[$Count] -Profile $Profile
+    		Stop-Transcript
+    		$content = Get-Content $logPath
+    		$pattern = 'Temporary PIN:\s*(\d{6})'
+    		$Global:Pin = $null
+    		foreach ($line in $content) {
+    		    if ($line -match $pattern) {
+    		        $Global:Pin = $Matches[1]
+    		        break
+    		    }
+    		}
+			$serialPattern = 'Serial (?:number|Number):\s*(\d+)'
+			$Global:SerialFromTranscript = $null
+			foreach ($line in $content) {
+			    if ($line -match $serialPattern) {
+			        $Global:SerialFromTranscript = $Matches[1]
+			        break
+			    }
+			}
+
+    		$newUser = [PSCustomObject]@{
+    		    UserID = $UserID[$Count]
+    		    Serial = $Global:SerialFromTranscript
+    		    Pin    = $Global:Pin
+    		}
+		
+    		$csvPath = "{ Users.csv FULL PATH HERE}"
+    		if (Test-Path $csvPath) {
+    		    $users = @(Import-Csv -Path $csvPath)
+    		    $users += $newUser
+    		} else {
+    		    $users = @($newUser)
+    		}
+    		$users | Export-Csv -Path $csvPath -NoTypeInformation
+		
+        	Remove-Item -Path $logPath -Force
+			$Count++
+		}
+	}
+    Write-Host ('='*60); Write-Host 'YubiKey detected!'; "$($YubiKey.DeviceType) - $($YubiKey.FormFactor) [$($YubiKey.FirmwareVersion)] ($($YubiKey.SerialNumber))" | Write-Host; Write-Host ('='*60)
+    while ($true) {
+        Write-Host "`nSelect an action:";
+        '1) Add Provider and default profiles','2) Login','3) Add Identity','4) Remove Identity','5) Wipe Key (fido)','6) List Profiles','7) Add Profile','8) Remove Profile','9) List Credentials','10) Change FIDO pin', '11) Device Infos (structured)', '12) Add Lock Code (careful)', '13) Clear Lock Code', '14) Mass Management', '15) Exit' | ForEach-Object { Write-Host $_ }
+        switch (Read-Host 'Enter number') {
+            '1' { Add-ProfileConfiguration }
+            '2' { Login }
+            '3' { 
+					Write-Host "`nProfile list :`n"
+					Show-Profiles
+					Add-YkIdentity
+				}
+            '4' { Remove-YkIdentity -UserId (Read-Host 'User ID') }
+            '5' { Reset-YkFidoCredentials }
+			'6' { Show-Profiles }
+			'7' { Add-Profile }
+			'8' { Remove-Profile }
+			'9' { Show-Credentials }
+			'10' { Set-YkFidoPin }
+			'11' { Get-YkInfo -SerialNumber $YubiKey.SerialNumber | Format-List }
+			'12' { Add-LockCode}
+			'13' { Clear-LockCode }
+			'14' { Invoke-YkAutoManage -MassManagement }
+			'15' { return }
+            default { Write-Warning 'Invalid selection.' }
+        }
+    }
+}
