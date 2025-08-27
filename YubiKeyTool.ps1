@@ -453,33 +453,67 @@ function Reset-YkFidoCredentials
 
 function Add-LockCode {
     [CmdletBinding()]
-    param ()
+    param (
+		[switch] $TestMode
+	)
+	if($TestMode)
+	{
+		$Stop = $false
+    	while (!$Stop) {
+    	    $Key = ykman list --serials
+    	    Write-Host "Waiting for 1 key..."
+    	    Start-Sleep 3
+    	    if ($Key) {
+    	        $Stop = $true
+    	    }
+    	}
 
-    $Stop = $false
-    while (!$Stop) {
-        $Key = ykman list --serials
-        Write-Host "Waiting for 1 key..."
-        Start-Sleep 3
-        if ($Key) {
-            $Stop = $true
-        }
-    }
+    	$Key = ykman list --serials
+    	$LockCode = '9AF3C7D1E028B64FC52AD0E8B71C4F93'
 
-    $Key = ykman list --serials
-    $LockCode = Get-RandomHexNumber
-    Write-Warning "Generated LockCode: $LockCode DO NOT LOOSE IT !
-	"
+    	Write-Warning "Generated LockCode: $LockCode DO NOT LOOSE IT !
+		"
 
-    Invoke-YubiKeyManager -Command "--device $Key config set-lock-code --new-lock-code $LockCode"
+    	Invoke-YubiKeyManager -Command "--device $Key config set-lock-code --new-lock-code $LockCode"
 
-    $LockRecord = [PSCustomObject]@{
-        SerialNumber = $Key
-        LockCode     = $LockCode
-    }
+    	$LockRecord = [PSCustomObject]@{
+    	    SerialNumber = $Key
+    	    LockCode     = $LockCode
+    	}
 
-    $CsvPath = "{ LockCodes.csv FULL PATH HERE }"
+    	$CsvPath = "{ LockCodes.csv FULL PATH HERE }"
 
-    $LockRecord | Export-Csv -Path $CsvPath -Append -NoTypeInformation
+    	$LockRecord | Export-Csv -Path $CsvPath -Append -NoTypeInformation
+	}
+	else
+	{
+
+		$Stop = $false
+		while (!$Stop) {
+			$Key = ykman list --serials
+			Write-Host "Waiting for 1 key..."
+			Start-Sleep 3
+			if ($Key) {
+				$Stop = $true
+			}
+		}
+
+		$Key = ykman list --serials
+		$LockCode = Get-RandomHexNumber
+		Write-Warning "Generated LockCode: $LockCode DO NOT LOOSE IT !
+		"
+
+		Invoke-YubiKeyManager -Command "--device $Key config set-lock-code --new-lock-code $LockCode"
+
+		$LockRecord = [PSCustomObject]@{
+			SerialNumber = $Key
+			LockCode     = $LockCode
+		}
+
+		$CsvPath = "{ LockCodes.csv FULL PATH HERE }"
+
+		$LockRecord | Export-Csv -Path $CsvPath -Append -NoTypeInformation
+	}
 }
 
 
